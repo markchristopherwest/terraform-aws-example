@@ -1,0 +1,91 @@
+{"variables": {
+  "aws_region": "us-east-1",
+  "vault_version": "1.8.2",
+  "vault_module_version": "v0.17.0",
+  "vault_download_url": "{{env `VAULT_DOWNLOAD_URL`}}",
+  "AWS_ACCESS_KEY_ID": "{{env `AWS_ACCESS_KEY_ID`}}",
+  "AWS_SECRET_ACCESS_KEY": "{{env `AWS_SECRET_ACCESS_KEY`}}",
+  "ca_public_key_path": "pki/ca.crt.pem",
+  "tls_public_key_path": "pki/vault.crt.pem",
+  "tls_private_key_path": "pki/vault.crt.key"
+},
+  "builders": [{
+    "ami_name": "vault-ubuntu20-{{isotime | clean_resource_name}}-{{uuid}}",
+    "ami_description": "An Ubuntu 20.04 AMI that has Vault Enterprise installed.",
+    "instance_type": "t2.micro",
+    "name": "ubuntu20-ami",
+    "region": "{{user `aws_region`}}",
+    "type": "amazon-ebs",
+    "source_ami_filter": {
+      "filters": {
+        "virtualization-type": "hvm",
+        "architecture": "x86_64",
+        "name": "ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*",
+        "block-device-mapping.volume-type": "gp2",
+        "root-device-type": "ebs"
+      },
+      "owners": ["099720109477"],
+      "most_recent": true
+    },
+    "ssh_username": "ubuntu"
+  }],
+  "provisioners": [{
+      "type": "shell",
+      "inline": [
+          "mkdir -p /tmp/terraform-aws-vault",
+          "git clone --branch {{user `vault_module_version`}} https://github.com/hashicorp/terraform-aws-vault.git  /tmp/terraform-aws-vault",
+          "sudo mkdir -p /opt/vault/bin",
+          "sudo touch /opt/vault/bin/run-vault",
+          "sudo cp /tmp/terraform-aws-vault/modules/run-vault/run-vault /opt/vault/bin/run-vault",        
+          "sudo apt-get install apt-transport-https",
+          "sudo apt-get update",
+          "sudo apt-get -y upgrade",
+          "sudo apt install software-properties-common",
+          "sudo apt-get -y install chrony curl htop python3.9",
+          "sudo apt-get install -y python3-pip",
+          "sudo pip install boto3",
+          "sudo swapoff --all"
+      ],
+      "pause_before": "30s"
+ },
+{
+  "type": "file",
+  "source": "{{user `ca_public_key_path`}}",
+  "destination": "/tmp/ca.crt.pem"
+},{
+  "type": "file",
+  "source": "{{user `tls_public_key_path`}}",
+  "destination": "/tmp/vault.crt.pem"
+},{
+  "type": "file",
+  "source": "{{user `tls_private_key_path`}}",
+  "destination": "/tmp/vault.key.pem"
+},
+ {
+  "type": "shell",
+  "script": "./scripts/install-vault.sh"
+ },
+ {
+  "type": "shell",
+  "inline": [
+    "sudo mkdir -p /opt/vault/tls",
+    "sudo mv /tmp/ca.crt.pem /opt/vault/tls/",
+    "sudo mv /tmp/vault.crt.pem /opt/vault/tls/",
+    "sudo mv /tmp/vault.key.pem /opt/vault/tls/",
+    "sudo chown -R vault:vault /opt/vault/tls/",
+    "sudo chmod -R 600 /opt/vault/tls",
+    "sudo chmod 700 /opt/vault/tls",
+    "sudo /tmp/terraform-aws-vault/modules/update-certificate-store/update-certificate-store --cert-file-path /opt/vault/tls/ca.crt.pem",
+    "sudo sed -i -e '/StartLimitIntervalSec/d' /lib/systemd/system/vault.service"
+  ],
+  "pause_before": "30s"
+},
+{
+ "type": "shell",
+ "inline": [
+   "df"
+ ]
+}
+
+]
+}
